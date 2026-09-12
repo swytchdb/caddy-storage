@@ -25,6 +25,7 @@
 package caddy
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -358,7 +359,9 @@ func claimRuntime(cfg beacon.RuntimeConfig, keyPrefix string) error {
 		return nil
 	}
 
-	rt, err := beacon.NewRuntime(cfg)
+	// The runtime spans Caddy reloads; releaseRuntime stops it when the
+	// last reference is released, independently of any module's context.
+	rt, err := beacon.NewRuntime(context.Background(), cfg)
 	if err != nil {
 		return fmt.Errorf("start beacon runtime: %w", err)
 	}
