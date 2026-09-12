@@ -37,6 +37,10 @@ go test ./...
 go vet ./...
 ```
 
+GitHub Actions runs on pushes and pull requests, with a manual run option.
+CI builds the module, runs tests with race detection and uploads coverage,
+and checks formatting, module tidiness, dependency integrity, and `go vet`.
+
 ## Configure
 
 ### Caddyfile
