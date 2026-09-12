@@ -18,6 +18,29 @@ env:
   GOFLAGS: -mod=readonly
 
 jobs:
+  xcaddy:
+    name: Build latest Caddy with Swytch storage
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # xcaddy creates a temporary module and resolves its dependencies.
+      GOFLAGS: -mod=mod
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install xcaddy
+        run: go install github.com/caddyserver/xcaddy/cmd/xcaddy@v0.4.6
+      - name: Build latest Caddy with this checkout
+        run: xcaddy build latest --with "github.com/swytchdb/caddy-storage=${GITHUB_WORKSPACE}" --output "${RUNNER_TEMP}/caddy"
+      - name: Verify storage module registration
+        shell: bash
+        run: |
+          "${RUNNER_TEMP}/caddy" version
+          "${RUNNER_TEMP}/caddy" list-modules | grep -Fx 'caddy.storage.swytch'
+
   checks:
     name: Formatting, dependencies, and vet
     runs-on: ubuntu-latest
