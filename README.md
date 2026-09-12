@@ -1,11 +1,13 @@
 # Caddy storage module for Swytch
 
-A pool of Caddy instances configured with this module becomes a Swytch
-cluster: TLS certificates, ACME account state, and OCSP staples replicate
-peer-to-peer, and ACME issuance locks are coordinated through Swytch's
-serializable transactional path.
+Share TLS certificates across Caddy instances without an external database.
 
-No external KV storage required.
+Each instance runs an embedded Swytch node. Together, they replicate TLS
+certificates, ACME account state, and OCSP staples peer-to-peer and coordinate
+ACME issuance locks through Swytch's serializable transactions.
+
+Discover peers through DNS, or use Swytch Cloud for peer discovery and durable
+storage.
 
 ## Build a Caddy binary with this module
 
