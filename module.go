@@ -17,11 +17,9 @@
  * along with Swytch. If not, see <https://www.gnu.org/licenses/>.
  */
 
-// Package caddy provides a Caddy storage module backed by an embedded
-// swytch effects-engine node. A pool of Caddy instances configured with
-// this module forms a swytch cluster that replicates TLS state
-// peer-to-peer and coordinates ACME locks via swytch's transactional
-// path.
+// Package caddy provides Swytch storage for sharing TLS certificates across
+// Caddy instances without an external database. An embedded Swytch node
+// replicates TLS state peer-to-peer and coordinates ACME issuance locks.
 package caddy
 
 import (
@@ -61,17 +59,20 @@ const (
 	defaultLockTTL     = 30 * time.Second
 )
 
-// SwytchStorage is a pool of Caddy instances configured with this module that becomes a Swytch
-// cluster: TLS certificates, ACME account state, and OCSP staples replicate
-// peer-to-peer, and ACME issuance locks are coordinated through Swytch's
-// serializable transactional path.
+// SwytchStorage shares TLS certificates across Caddy instances without an external database.
 //
-// No external KV storage required.
+// Each instance runs an embedded Swytch node. Together, they replicate TLS
+// certificates, ACME account state, and OCSP staples peer-to-peer and coordinate
+// ACME issuance locks through Swytch's serializable transactions.
 //
 // Point your Caddy instances at the same `join` DNS name and they'll
 // form a cluster. `join` should resolve to reachable peer addresses:
 // SRV records are preferred, otherwise A/AAAA records are used with
 // `cluster_port`. `cluster_passphrase` must match across every node.
+//
+// Alternatively, set `connection_secret` to use Swytch Cloud for peer discovery
+// and durable storage. This replaces `cluster_passphrase` and `join`;
+// TLS state still replicates peer-to-peer.
 type SwytchStorage struct {
 	// ClusterPassphrase enables cluster mode. Empty = single-node, no
 	// replication. Must match across every peer.
