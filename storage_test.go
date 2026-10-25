@@ -467,6 +467,41 @@ func TestCaddyfile_DataDirArguments(t *testing.T) {
 	}
 }
 
+func TestProvision_DataDirPlaceholders(t *testing.T) {
+	resetRuntimeForTest(t)
+	t.Cleanup(func() { resetRuntimeForTest(t) })
+	t.Setenv("SWYTCH_TEST_EMPTY_DATA_DIR", "")
+	ctx := caddycore.Context{Context: context.Background()}
+
+	for _, value := range []string{
+		"{unknown.data_dir}",
+		"{env.SWYTCH_TEST_EMPTY_DATA_DIR}",
+		"/tmp/{unknown.data_dir}/swytch",
+		"/tmp/{env.SWYTCH_TEST_EMPTY_DATA_DIR}/swytch",
+	} {
+		t.Run(value, func(t *testing.T) {
+			s := &SwytchStorage{DataDir: value}
+			if err := s.Provision(ctx); err == nil || !strings.Contains(err.Error(), "data_dir") {
+				t.Fatalf("expected data_dir expansion error, got %v", err)
+			}
+			if s.DataDir != value {
+				t.Errorf("failed expansion changed DataDir to %q", s.DataDir)
+			}
+			if singletonRuntime() != nil {
+				t.Fatal("failed expansion started a runtime")
+			}
+		})
+	}
+
+	s := &SwytchStorage{}
+	if err := s.Provision(ctx); err != nil {
+		t.Fatalf("omitted data_dir: %v", err)
+	}
+	if s.DataDir != "" || singletonRuntime().cfg.DataDir != "" {
+		t.Fatal("omitted data_dir should leave local durability disabled")
+	}
+}
+
 func TestProvision_DataDirRecovery(t *testing.T) {
 	resetRuntimeForTest(t)
 	t.Cleanup(func() { resetRuntimeForTest(t) })

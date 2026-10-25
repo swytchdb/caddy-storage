@@ -147,7 +147,13 @@ func (s *SwytchStorage) CertMagicStorage() (certmagic.Storage, error) {
 // `{file./run/secrets/swytch}` in the Caddyfile.
 func (s *SwytchStorage) Provision(ctx caddycore.Context) error {
 	repl := caddycore.NewReplacer()
-	s.DataDir = repl.ReplaceAll(s.DataDir, "")
+	if s.DataDir != "" {
+		dataDir, err := repl.ReplaceOrErr(s.DataDir, true, true)
+		if err != nil {
+			return fmt.Errorf("swytch storage: data_dir: %w", err)
+		}
+		s.DataDir = dataDir
+	}
 	s.ClusterPassphrase = repl.ReplaceAll(s.ClusterPassphrase, "")
 	s.ConnectionSecret = repl.ReplaceAll(s.ConnectionSecret, "")
 	s.Join = repl.ReplaceAll(s.Join, "")
