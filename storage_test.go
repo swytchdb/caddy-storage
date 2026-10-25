@@ -21,15 +21,18 @@ package caddy
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
 	"testing"
 	"time"
 
+	caddycore "github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
 	"github.com/caddyserver/certmagic"
 
@@ -365,6 +368,7 @@ func parseCaddyfile(t *testing.T, body string) (*SwytchStorage, error) {
 
 func TestCaddyfile_AllOptions(t *testing.T) {
 	s, err := parseCaddyfile(t, `swytch {
+		data_dir /var/lib/caddy/swytch
 		cluster_passphrase secret-123
 		join cluster.example.com
 		cluster_port 9999
@@ -377,6 +381,9 @@ func TestCaddyfile_AllOptions(t *testing.T) {
 	}
 	if s.ClusterPassphrase != "secret-123" {
 		t.Errorf("ClusterPassphrase: got %q", s.ClusterPassphrase)
+	}
+	if s.DataDir != "/var/lib/caddy/swytch" {
+		t.Errorf("DataDir: got %q", s.DataDir)
 	}
 	if s.Join != "cluster.example.com" {
 		t.Errorf("Join: got %q", s.Join)
@@ -417,7 +424,7 @@ func TestCaddyfile_Empty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("empty block: %v", err)
 	}
-	if s.ClusterPassphrase != "" || s.ClusterPort != 0 || s.KeyPrefix != "" {
+	if s.DataDir != "" || s.ClusterPassphrase != "" || s.ClusterPort != 0 || s.KeyPrefix != "" {
 		t.Errorf("empty block produced non-zero fields: %+v", s)
 	}
 }
@@ -452,6 +459,131 @@ func TestCaddyfile_InvalidLockTTL(t *testing.T) {
 	}
 }
 
+func TestCaddyfile_DataDirArguments(t *testing.T) {
+	for _, args := range []string{"", "/tmp/one /tmp/two"} {
+		if _, err := parseCaddyfile(t, "swytch {\n data_dir "+args+"\n}"); err == nil {
+			t.Errorf("expected error for data_dir arguments %q", args)
+		}
+	}
+}
+
+func TestProvision_DataDirPlaceholders(t *testing.T) {
+	resetRuntimeForTest(t)
+	t.Cleanup(func() { resetRuntimeForTest(t) })
+	t.Setenv("SWYTCH_TEST_EMPTY_DATA_DIR", "")
+	ctx := caddycore.Context{Context: context.Background()}
+
+	for _, value := range []string{
+		"{unknown.data_dir}",
+		"{env.SWYTCH_TEST_EMPTY_DATA_DIR}",
+		"/tmp/{unknown.data_dir}/swytch",
+		"/tmp/{env.SWYTCH_TEST_EMPTY_DATA_DIR}/swytch",
+	} {
+		t.Run(value, func(t *testing.T) {
+			s := &SwytchStorage{DataDir: value}
+			if err := s.Provision(ctx); err == nil || !strings.Contains(err.Error(), "data_dir") {
+				t.Fatalf("expected data_dir expansion error, got %v", err)
+			}
+			if s.DataDir != value {
+				t.Errorf("failed expansion changed DataDir to %q", s.DataDir)
+			}
+			if singletonRuntime() != nil {
+				t.Fatal("failed expansion started a runtime")
+			}
+		})
+	}
+
+	s := &SwytchStorage{}
+	if err := s.Provision(ctx); err != nil {
+		t.Fatalf("omitted data_dir: %v", err)
+	}
+	if s.DataDir != "" || singletonRuntime().cfg.DataDir != "" {
+		t.Fatal("omitted data_dir should leave local durability disabled")
+	}
+}
+
+func TestProvision_DataDirRecovery(t *testing.T) {
+	resetRuntimeForTest(t)
+	t.Cleanup(func() { resetRuntimeForTest(t) })
+	dir := filepath.Join(t.TempDir(), "mirror")
+	t.Setenv("SWYTCH_TEST_DATA_DIR", dir)
+	ctx := caddycore.Context{Context: context.Background()}
+
+	// Exercise JSON decoding, placeholder expansion, and the real runtime.
+	start := func() (*SwytchStorage, certmagic.Storage) {
+		t.Helper()
+		var s SwytchStorage
+		if err := json.Unmarshal([]byte(`{"data_dir":"{env.SWYTCH_TEST_DATA_DIR}"}`), &s); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Provision(ctx); err != nil {
+			t.Fatalf("Provision: %v", err)
+		}
+		if s.DataDir != dir {
+			t.Fatalf("DataDir = %q, want %q", s.DataDir, dir)
+		}
+		store, err := s.CertMagicStorage()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return &s, store
+	}
+	s, store := start()
+	const key = "certs/example.com/cert.pem"
+	if err := store.Store(ctx, key, []byte("persisted-cert")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Cleanup(); err != nil {
+		t.Fatal(err)
+	}
+	if singletonRuntime() != nil {
+		t.Fatal("runtime should be stopped before recovery")
+	}
+	s, store = start()
+	got, err := store.Load(ctx, key)
+	if err != nil || string(got) != "persisted-cert" {
+		t.Fatalf("Load after restart = %q, %v", got, err)
+	}
+	if err := s.Cleanup(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestProvision_ValidateSkipsDataDir(t *testing.T) {
+	resetRuntimeForTest(t)
+	t.Cleanup(func() { resetRuntimeForTest(t) })
+	saved := os.Args
+	os.Args = []string{"caddy", "validate"}
+	t.Cleanup(func() { os.Args = saved })
+	dir := filepath.Join(t.TempDir(), "must-not-be-created")
+	s := &SwytchStorage{DataDir: dir}
+	if err := s.Provision(caddycore.Context{Context: context.Background()}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(dir); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("validation touched data_dir: %v", err)
+	}
+	if singletonRuntime().cfg.DataDir != "" {
+		t.Fatal("validation passed data_dir to the runtime")
+	}
+}
+
+func TestProvision_DataDirOpenFailure(t *testing.T) {
+	resetRuntimeForTest(t)
+	t.Cleanup(func() { resetRuntimeForTest(t) })
+	path := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(path, []byte("not a directory"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	s := &SwytchStorage{DataDir: path}
+	if err := s.Provision(caddycore.Context{Context: context.Background()}); err == nil {
+		t.Fatal("expected error for data_dir pointing to a file")
+	}
+	if singletonRuntime() != nil {
+		t.Fatal("failed Provision installed a runtime")
+	}
+}
+
 // --- Singleton lifecycle --------------------------------------------------
 
 // TestClaimRuntime_RefcountAndIncompatibility exercises claimRuntime /
@@ -477,6 +609,13 @@ func TestClaimRuntime_RefcountAndIncompatibility(t *testing.T) {
 	}
 	if singletonRuntime().refs != 2 {
 		t.Fatalf("refs after second claim: got %d, want 2", singletonRuntime().refs)
+	}
+
+	if err := claimRuntime(beacon.RuntimeConfig{DataDir: t.TempDir()}, "__caddy:"); err == nil || !strings.Contains(err.Error(), "data_dir") {
+		t.Fatalf("expected data_dir restart error, got %v", err)
+	}
+	if singletonRuntime().refs != 2 {
+		t.Fatalf("rejected data_dir change altered refcount: %d", singletonRuntime().refs)
 	}
 
 	// Conflicting key_prefix on reclaim must error without bumping.

@@ -74,6 +74,10 @@ const (
 // and durable storage. This replaces `cluster_passphrase` and `join`;
 // TLS state still replicates peer-to-peer.
 type SwytchStorage struct {
+	// DataDir enables local durability by mirroring resident effects to disk.
+	// Empty disables local durability. Each node must use its own directory.
+	DataDir string `json:"data_dir,omitempty"`
+
 	// ClusterPassphrase enables cluster mode. Empty = single-node, no
 	// replication. Must match across every peer.
 	ClusterPassphrase string `json:"cluster_passphrase,omitempty"`
@@ -138,11 +142,18 @@ func (s *SwytchStorage) CertMagicStorage() (certmagic.Storage, error) {
 // Provision is called once per Caddy reload. It claims a reference on
 // the process-wide swytch runtime, starting it on the first call.
 //
-// String fields (passphrase / join / advertise / prefix) are expanded
-// through Caddy's Replacer so users can write `{env.SWYTCH_PASS}` or
+// String fields are expanded through Caddy's Replacer so users can write
+// `{env.SWYTCH_DATA_DIR}`, `{env.SWYTCH_PASS}`, or
 // `{file./run/secrets/swytch}` in the Caddyfile.
 func (s *SwytchStorage) Provision(ctx caddycore.Context) error {
 	repl := caddycore.NewReplacer()
+	if s.DataDir != "" {
+		dataDir, err := repl.ReplaceOrErr(s.DataDir, true, true)
+		if err != nil {
+			return fmt.Errorf("swytch storage: data_dir: %w", err)
+		}
+		s.DataDir = dataDir
+	}
 	s.ClusterPassphrase = repl.ReplaceAll(s.ClusterPassphrase, "")
 	s.ConnectionSecret = repl.ReplaceAll(s.ConnectionSecret, "")
 	s.Join = repl.ReplaceAll(s.Join, "")
@@ -179,6 +190,7 @@ func (s *SwytchStorage) Provision(ctx caddycore.Context) error {
 	}
 
 	cfg := beacon.RuntimeConfig{
+		DataDir:           s.DataDir,
 		ClusterPassphrase: s.ClusterPassphrase,
 		ConnectionSecret:  s.ConnectionSecret,
 		JoinAddr:          s.Join,
@@ -204,6 +216,8 @@ func (s *SwytchStorage) Provision(ctx caddycore.Context) error {
 		// validation succeeds) with no network activity. ConnectionSecret is
 		// cleared too — it derives the passphrase and starts CloudSync, which
 		// dials Swytch Cloud.
+		// Do not open or recover the live node's local mirror during validation.
+		cfg.DataDir = ""
 		cfg.ClusterPassphrase = ""
 		cfg.ConnectionSecret = ""
 		cfg.JoinAddr = ""
@@ -233,6 +247,7 @@ func (s *SwytchStorage) Cleanup() error {
 // UnmarshalCaddyfile parses the storage block:
 //
 //	storage swytch {
+//	    data_dir <path>
 //	    cluster_passphrase <pass>
 //	    connection_secret <secret>
 //	    join <dns>
@@ -250,6 +265,11 @@ func (s *SwytchStorage) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 	}
 	for d.NextBlock(0) {
 		switch d.Val() {
+		case "data_dir":
+			if !d.NextArg() {
+				return d.ArgErr()
+			}
+			s.DataDir = d.Val()
 		case "cluster_passphrase":
 			if !d.NextArg() {
 				return d.ArgErr()
@@ -332,7 +352,8 @@ func singletonRuntime() *sharedRuntime {
 // Everything beacon-level is bound at NewRuntime time and has no live
 // update path: the QUIC listener takes the port and advertise address,
 // the TLS cert SAN bakes in the advertise address, and the cluster
-// passphrase / join name configure peer discovery once. So any change
+// passphrase / join name configure peer discovery once. The data directory
+// is also opened once at startup. So any change
 // to those fields across a Caddy reload is rejected — the operator
 // must restart the process. The `lock_ttl` field is per-storage (lives
 // on swytchStore, not on the shared runtime) and DOES take effect on
@@ -343,6 +364,9 @@ func claimRuntime(cfg beacon.RuntimeConfig, keyPrefix string) error {
 
 	if currentRuntime != nil {
 		prev := currentRuntime.cfg
+		if prev.DataDir != cfg.DataDir {
+			return fmt.Errorf("data_dir cannot change without restarting the process")
+		}
 		if prev.ClusterPassphrase != cfg.ClusterPassphrase ||
 			prev.ConnectionSecret != cfg.ConnectionSecret ||
 			prev.JoinAddr != cfg.JoinAddr ||

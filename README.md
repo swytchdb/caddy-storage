@@ -46,6 +46,7 @@ go vet ./...
 ```caddyfile
 {
     storage swytch {
+        data_dir /var/lib/caddy/swytch   # optional local durability; disabled when empty
         cluster_passphrase <secret>     # empty = single-node (no replication)
         connection_secret <secret>      # Swytch Cloud durability; excludes cluster_passphrase + join
         join <dns-name>                 # peers resolve via DNS; optional
@@ -74,6 +75,7 @@ JSON-encoded equivalents of the Caddyfile keywords:
 {
   "storage": {
     "module": "swytch",
+    "data_dir": "/var/lib/caddy/swytch",
     "cluster_passphrase": "...",
     "connection_secret": "...",
     "join": "...",
@@ -89,9 +91,17 @@ JSON-encoded equivalents of the Caddyfile keywords:
 
 - The embedded engine is a process-wide singleton. Caddy reloads reuse it;
   changing `cluster_passphrase`, `connection_secret`, `join`, `cluster_port`,
-  `cluster_advertise`, or `key_prefix` at reload time is rejected — these are
-  all baked into the QUIC listener, TLS cert SAN, or peer-discovery state at
-  startup and there is no live-update path. Restart the process instead.
+  `cluster_advertise`, `data_dir`, or `key_prefix` at reload time is rejected —
+  these are all baked into the engine, QUIC listener, TLS cert SAN, or
+  peer-discovery state at startup and there is no live-update path. Restart
+  the process instead.
+- `data_dir` enables the engine's local disk mirror and restores resident
+  effects on startup. It is disabled by default and can be used with either
+  DNS clustering or Swytch Cloud. Use a separate writable directory for each
+  node; Caddy placeholders such as `{env.SWYTCH_DATA_DIR}` are supported.
+  This mirrors resident effects: eviction also removes their disk records,
+  so it is not an archival backup. `caddy validate` does not open the directory
+  or verify its permissions or contents.
 - `connection_secret` enables Swytch Cloud durability and is a self-contained
   cluster identity: the cluster passphrase derives from it and peers come from
   the cloud roster, so it is mutually exclusive with `cluster_passphrase` and
