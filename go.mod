@@ -3,7 +3,7 @@ module github.com/swytchdb/caddy-storage
 go 1.27.0
 
 require (
-	github.com/caddyserver/caddy/v2 v2.11.7
+	github.com/caddyserver/caddy/v2 v2.11.8
 	github.com/caddyserver/certmagic v0.25.6
 	github.com/swytchdb/engine v1.1.4
 	google.golang.org/protobuf v1.36.12
