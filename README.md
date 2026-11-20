@@ -20,6 +20,7 @@ is published:
 
 ```sh
 xcaddy build \
+  --replace github.com/quic-go/quic-go=github.com/quic-go/quic-go@v0.64.1 \
   --with github.com/swytchdb/caddy-storage
 ```
 
@@ -27,6 +28,7 @@ To build from a local checkout, use its absolute path:
 
 ```sh
 xcaddy build \
+  --replace github.com/quic-go/quic-go=github.com/quic-go/quic-go@v0.64.1 \
   --with github.com/swytchdb/caddy-storage=/abs/path/to/caddy-storage
 ```
 

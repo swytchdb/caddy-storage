@@ -34,7 +34,7 @@ jobs:
       - name: Install xcaddy
         run: go install github.com/caddyserver/xcaddy/cmd/xcaddy@v0.4.6
       - name: Build latest Caddy with this checkout
-        run: xcaddy build latest --with "github.com/swytchdb/caddy-storage=${GITHUB_WORKSPACE}" --output "${RUNNER_TEMP}/caddy"
+        run: xcaddy build latest --replace github.com/quic-go/quic-go=github.com/quic-go/quic-go@v0.64.1 --with "github.com/swytchdb/caddy-storage=${GITHUB_WORKSPACE}" --output "${RUNNER_TEMP}/caddy"
       - name: Verify storage module registration
         shell: bash
         run: |
